@@ -132,13 +132,11 @@ void validate(){
             if (dir) {
                 int a;
                 a = strlen(path)-1;
-                printf("path - %s\n",path);
                 if(path[a]=='/'){
                     strcat(path, "index.html");printf("path is: %s\n",path);
                 }else{
                     strcat(path, "/index.html");printf("path is: %s\n",path);
                 }
-printf("path - %s\n",path);
                 if ((fptr = fopen(path,"r")) == NULL){
                     send(client, "HTTP/1.1 404 OK\n", 16,0);
                     strcpy(path, "assets/404.html");
