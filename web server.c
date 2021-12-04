@@ -125,6 +125,8 @@ void contentType(){
             strcpy(type,"Content-Type: text/css\n\n");
       }else if(strcmp(extension,".png")==0){
             strcpy(type,"Content-Type: image/png\n\n");
+      }else if(strcmp(extension,".mp4")==0){
+            strcpy(type,"Content-Type: video/mp4\n\n");
       }else{
         printf("its folder\n");
       }
