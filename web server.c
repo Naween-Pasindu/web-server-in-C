@@ -9,7 +9,7 @@
 #include <errno.h>
 #pragma comment(lib, "ws2_32.lib")
 
-#define buffer_size 2048
+#define buffer_size 1024
 #define root "www"
 #define port 5000
 
@@ -66,23 +66,31 @@ int main() {
         //send(client, "Content-Type: text/html\n\n", 25,0);
         //send(client, "<html><body><H1>Hello world</H1></body></html>",46,0);
         printf("File sent\n");
-        close(client);
+        closesocket(client);
+
         printf("socket closed...\n");
+        memset(buffer, '\0',buffer_size);
+
     }
+    WSACleanup();
     close(netSocket);
     return 0;
 }
 
 void sendFile(int client){
     char temp[25]={'\0'},c;
-    long size =0;
-    while((c=fgetc(fptr))) {
-        if(c == EOF) break;
-        size++;
-    }
+    //long size =0;
+    //while((c=fgetc(fptr))) {
+        //if(c == EOF) break;
+        //size++;
+    //}
+    fseek(fptr, 0L, SEEK_END);
+    size_t size = ftell(fptr);
+    rewind(fptr);
     //fseek(fptr, 0, SEEK_END);
     //size = ftell(fptr);
-    fseek(fptr, 0, SEEK_SET);
+    //fseek(fptr, 0, SEEK_SET);
+    send(client,"Connection: close\n",18,0);
     sprintf(temp,"Content-length: %d\n",size);
     send(client,temp,strlen(temp),0);
     contentType();
@@ -115,6 +123,8 @@ void contentType(){
             strcpy(type,"Content-Type: application/x-javascript\n\n");
       }else if(strcmp(extension,".css")==0){
             strcpy(type,"Content-Type: text/css\n\n");
+      }else if(strcmp(extension,".png")==0){
+            strcpy(type,"Content-Type: image/png\n\n");
       }else{
         printf("its folder\n");
       }
@@ -137,7 +147,7 @@ void validate(){
                 }else{
                     strcat(path, "/index.html");printf("path is: %s\n",path);
                 }
-                if ((fptr = fopen(path,"r")) == NULL){
+                if ((fptr = fopen(path,"rb")) == NULL){
                     send(client, "HTTP/1.1 404 OK\n", 16,0);
                     strcpy(path, "assets/404.html");
                 }else{
@@ -146,17 +156,19 @@ void validate(){
             } else if (ENOENT == errno) {
                 send(client, "HTTP/1.1 404 OK\n", 16,0);
                 strcpy(path, "assets/404.html");
+                fptr = fopen(path,"rb");
             } else {
                 send(client, "HTTP/1.1 500 OK\n", 16,0);
                 strcpy(path, "assets/500.html");
+                fptr = fopen(path,"rb");
             }
-            fptr = fopen(path,"r");
+
             closedir(dir);
             printf("file - %s\n",path);
     }else{
             strcpy(request,root);
             strcat(request,path);
-            if ((fptr = fopen(request,"r")) == NULL){
+            if ((fptr = fopen(request,"rb")) == NULL){
                 send(client, "HTTP/1.1 404 OK\n", 16,0);
                 strcpy(path, "assets/404.html");
                 fptr = fopen(path,"r");
