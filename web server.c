@@ -7,6 +7,7 @@
 #include <ws2tcpip.h>
 #include <dirent.h>
 #include <errno.h>
+
 #pragma comment(lib, "ws2_32.lib")
 
 #define buffer_size 1024
@@ -17,22 +18,39 @@
 FILE *fptr;
 DIR *dir;
 
-int netSocket,portNo = port,client;
+int netSocket,portNo = port;
 char *path,*extension,request[100]={'\0'};
 socklen_t addrlen;
 
+struct clientList {
+    SOCKET socket;
+    socklen_t length;
+    struct sockaddr_storage address;
+    struct clientList *next;
+    struct clientList *previous;
+};
+
+static struct clientList *clients = NULL;
+
+void sendFile(struct clientList *);
+void parse(char*);
+void contentType(int);
+void validate(int);
+struct clientList *addClient();
+void removeClient(struct clientList*);
+
 int main() {
-    char c = 0,*buffer = malloc(buffer_size);
+    char *buffer = malloc(buffer_size);
+    char address_buffer[40];
     WORD versionWanted = MAKEWORD(1,1);
     WSADATA wsaData;
     if (WSAStartup(MAKEWORD(2,2), &wsaData) != 0){
         printf("Failed. Error Code : %d.\nPress a key to exit...", WSAGetLastError());
-        c = getch();
         return 1;
     }
     //create socket
     netSocket = socket(AF_INET,SOCK_STREAM,0);
-
+    printf("Configuring server...\n");
     //specify an address for the socket
     struct sockaddr_in address;
     address.sin_family = AF_INET;
@@ -42,42 +60,64 @@ int main() {
     //binding
     addrlen = sizeof((struct SOCKADDR *)&address);
     bind(netSocket,(struct SOCKADDR *)&address,(socklen_t *) &addrlen);
-    listen(netSocket,20);
-    addrlen = sizeof(address);
-    int receive;
+    printf("Listening...\n");
+    if (listen(netSocket,20) < 0) {
+        printf(stderr, "listening failed...\n");
+        exit(EXIT_FAILURE);
+    }
     while(1){
-        printf("open a new socket...\n");
-        client = accept(netSocket,NULL,NULL);
-        printf("waiting connection...\n");
-        //client = accept(netSocket,(struct sockaddr *) &address, &addrlen);
-        receive = recv(client, buffer, buffer_size,0); //wait until receive the complete request
-        if(receive==0){
-            continue;
-        }
-        if(strlen(buffer)<10){
-            printf("jump to next\n");
-            continue;
-        }
-        parse(buffer);
-        validate();
-        sendFile(client);
-        //send(client, "HTTP/1.1 200 OK\n", 16,0);
-        //send(client, "Content-length: 46\n", 19,0);
-        //send(client, "Content-Type: text/html\n\n", 25,0);
-        //send(client, "<html><body><H1>Hello world</H1></body></html>",46,0);
-        printf("File sent\n");
-        closesocket(client);
+        fd_set reads;
+        FD_ZERO(&reads);
+        FD_SET(netSocket,&reads);
+        SOCKET max_socket = netSocket;
+        struct clientList *client = clients;
 
-        printf("socket closed...\n");
-        memset(buffer, '\0',buffer_size);
+        while(client) {
+            FD_SET(client->socket, &reads);
+            if (client->socket > max_socket){
+                max_socket = client->socket;
+            }
+            client = client->next;
+        }
 
+        if(select(max_socket+1,&reads,NULL,NULL,NULL)<0){
+            printf("SELECT error.\n");
+            exit(EXIT_FAILURE);
+        }
+
+        if (FD_ISSET(netSocket, &reads)) {
+            client = addClient(NULL);
+            client->socket = accept(netSocket,(struct sockaddr*) &(client->address),&(client->length));
+        }
+
+        client = clients;
+        while(client) {
+                if (FD_ISSET(client->socket, &reads)) {
+                    int r = recv(client->socket,buffer, buffer_size,0);
+                    if (r < 1) {
+                        removeClient(client);
+                    } else {
+                        parse(buffer);
+                        getnameinfo((struct sockaddr*)&client->address,client->length,address_buffer, sizeof(address_buffer), 0, 0,NI_NUMERICHOST);
+                        printf("%s requesting : %s\n",address_buffer,path);
+                        validate(client->socket);
+                        sendFile(client);
+                        printf("File send to : %s\n",address_buffer);
+                        closesocket(client->socket);
+                        printf("socket closed...\n");
+                        memset(buffer, '\0',buffer_size);
+                        FD_CLR(client->socket,&reads);
+                    }
+                }
+                client = client->next;
+        }
     }
     WSACleanup();
-    close(netSocket);
-    return 0;
+    closesocket(netSocket);
+    return EXIT_SUCCESS;
 }
 
-void sendFile(int client){
+void sendFile(struct clientList *client){
     char temp[25]={'\0'},c;
     //long size =0;
     //while((c=fgetc(fptr))) {
@@ -90,16 +130,17 @@ void sendFile(int client){
     //fseek(fptr, 0, SEEK_END);
     //size = ftell(fptr);
     //fseek(fptr, 0, SEEK_SET);
-    send(client,"Connection: close\n",18,0);
+    send(client->socket,"Connection: close\n",18,0);
     sprintf(temp,"Content-length: %d\n",size);
-    send(client,temp,strlen(temp),0);
-    contentType();
+    send(client->socket,temp,strlen(temp),0);
+    contentType(client->socket);
     char *string = malloc(sizeof(char)*(size));
     memset(string, '\0',size);
     fread(string, 1, size, fptr);
-    send(client,string,size, 0);
+    send(client->socket,string,size, 0);
     fclose(fptr);
     memset(request, '\0',100);
+    removeClient(client);
 }
 
 void parse(char* line){
@@ -108,7 +149,7 @@ void parse(char* line){
     path = strtok(NULL, " ");
 }
 
-void contentType(){
+void contentType(int clientPort){
       char type[70] = {'\0'};
       extension = strrchr(path,'.');// This returns a pointer to the first occurrence of some character in the string
       if((strcmp(extension,".htm"))==0 || (strcmp(extension,".html"))==0){
@@ -130,10 +171,10 @@ void contentType(){
       }else{
         printf("its folder\n");
       }
-      send(client,type,strlen(type),0);
+      send(clientPort,type,strlen(type),0);
 }
 
-void validate(){
+void validate(int clientPort){
     extension = strrchr(path,'.');
     if(extension == NULL){
             char temp[50] = {'\0'};
@@ -145,39 +186,72 @@ void validate(){
                 int a;
                 a = strlen(path)-1;
                 if(path[a]=='/'){
-                    strcat(path, "index.html");printf("path is: %s\n",path);
+                    strcat(path, "index.html");
                 }else{
-                    strcat(path, "/index.html");printf("path is: %s\n",path);
+                    strcat(path, "/index.html");
                 }
                 if ((fptr = fopen(path,"rb")) == NULL){
-                    send(client, "HTTP/1.1 404 OK\n", 16,0);
+                    send(clientPort, "HTTP/1.1 404 OK\n", 16,0);
                     strcpy(path, "assets/404.html");
                 }else{
-                    send(client, "HTTP/1.1 200 OK\n", 16,0);
+                    send(clientPort, "HTTP/1.1 200 OK\n", 16,0);
                 }
             } else if (ENOENT == errno) {
-                send(client, "HTTP/1.1 404 OK\n", 16,0);
+                send(clientPort, "HTTP/1.1 404 OK\n", 16,0);
                 strcpy(path, "assets/404.html");
                 fptr = fopen(path,"rb");
             } else {
-                send(client, "HTTP/1.1 500 OK\n", 16,0);
+                send(clientPort, "HTTP/1.1 500 OK\n", 16,0);
                 strcpy(path, "assets/500.html");
                 fptr = fopen(path,"rb");
             }
 
             closedir(dir);
-            printf("file - %s\n",path);
     }else{
             strcpy(request,root);
             strcat(request,path);
             if ((fptr = fopen(request,"rb")) == NULL){
-                send(client, "HTTP/1.1 404 OK\n", 16,0);
+                send(clientPort, "HTTP/1.1 404 OK\n", 16,0);
                 strcpy(path, "assets/404.html");
                 fptr = fopen(path,"r");
-                printf("file - %s\n",path);
             }else{
-                send(client, "HTTP/1.1 200 OK\n", 16,0);
-                printf("file - %s\n",request);
+                send(clientPort, "HTTP/1.1 200 OK\n", 16,0);
             }
     }
+}
+
+struct clientList *addClient(){
+    struct clientList *new_node = (struct clientList*)malloc(sizeof(struct clientList));
+    struct clientList *last = clients;
+    new_node->next = NULL;
+    if (clients == NULL) {
+        new_node->previous = NULL;
+        clients = new_node;
+        return new_node;
+    }
+    while (last->next != NULL)
+        last = last->next;
+    last->next = new_node;
+    new_node->previous = last;
+    return new_node;
+}
+
+struct clientList *lastClient(){
+    struct clientList *client = clients;
+    while(client->next != NULL) {
+        client = client->next;
+    }
+    return client;
+}
+
+void removeClient(struct clientList *del){
+    if (clients == NULL || del == NULL)
+        return;
+    if (clients == del)
+        clients = del->next;
+    if (del->next != NULL)
+        del->next->previous = del->previous;
+    if (del->previous != NULL)
+        del->previous->next = del->next;
+    free(del);
 }
