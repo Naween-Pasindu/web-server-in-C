@@ -186,7 +186,7 @@ void validate(int clientPort){
                     strcat(path, "/index.html");
                 }
                 if ((fptr = fopen(path,"rb")) == NULL){
-                    send(clientPort, "HTTP/1.1 404 OK\n", 16,0);
+                    send(clientPort, "HTTP/1.1 404 NOT FOUND\n", 23,0);
                     printf("Response code :404\n");
                     strcpy(path, "assets/404.html");
                 }else{
@@ -194,12 +194,12 @@ void validate(int clientPort){
                     printf("Response code :200\n");
                 }
             } else if (ENOENT == errno) {
-                send(clientPort, "HTTP/1.1 404 OK\n", 16,0);
+                send(clientPort, "HTTP/1.1 404 NOT FOUND\n", 23,0);
                 printf("Response code :404\n");
                 strcpy(path, "assets/404.html");
                 fptr = fopen(path,"rb");
             } else {
-                send(clientPort, "HTTP/1.1 500 OK\n", 16,0);
+                send(clientPort, "HTTP/1.1 500 INTERNAL SERVER ERROR\n", 35,0);
                 printf("Response code :500\n");
                 strcpy(path, "assets/500.html");
                 fptr = fopen(path,"rb");
@@ -210,7 +210,7 @@ void validate(int clientPort){
             strcpy(request,root);
             strcat(request,path);
             if ((fptr = fopen(request,"rb")) == NULL){
-                send(clientPort, "HTTP/1.1 404 OK\n", 16,0);
+                send(clientPort, "HTTP/1.1 404 NOT FOUND\n", 23,0);
                 strcpy(path, "assets/404.html");
                 printf("Response code :404\n");
                 fptr = fopen(path,"r");
