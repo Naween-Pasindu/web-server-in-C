@@ -12,7 +12,7 @@
 
 #define buffer_size 1024
 #define root "www"
-#define port 5000
+#define port 8080
 
 //global declaration
 FILE *fptr;
@@ -60,7 +60,6 @@ int main() {
     //binding
     addrlen = sizeof((struct SOCKADDR *)&address);
     bind(netSocket,(struct SOCKADDR *)&address,(socklen_t *) &addrlen);
-    printf("Listening...\n");
     if (listen(netSocket,20) < 0) {
         printf(stderr, "listening failed...\n");
         exit(EXIT_FAILURE);
@@ -79,15 +78,17 @@ int main() {
             }
             client = client->next;
         }
-
+        printf("Listening...\n");
         if(select(max_socket+1,&reads,NULL,NULL,NULL)<0){
             printf("SELECT error.\n");
             exit(EXIT_FAILURE);
         }
-
         if (FD_ISSET(netSocket, &reads)) {
             client = addClient(NULL);
             client->socket = accept(netSocket,(struct sockaddr*) &(client->address),&(client->length));
+            getnameinfo((struct sockaddr*)&client->address,client->length,address_buffer, sizeof(address_buffer), 0, 0,NI_NUMERICHOST);
+            printf("Incomming connection from: %s\n",address_buffer);
+            printf("Assigned port :%d\n",client->socket);
         }
 
         client = clients;
@@ -97,17 +98,17 @@ int main() {
                     if (r < 1) {
                         removeClient(client);
                     } else {
-                        parse(buffer);
                         getnameinfo((struct sockaddr*)&client->address,client->length,address_buffer, sizeof(address_buffer), 0, 0,NI_NUMERICHOST);
-                        printf("%s requesting : %s\n",address_buffer,path);
+                        printf("%s:%d requesting : ",address_buffer,client->socket);
+                        parse(buffer);
                         validate(client->socket);
                         sendFile(client);
                         printf("File send to : %s\n",address_buffer);
-                        closesocket(client->socket);
                         printf("socket closed...\n");
                         memset(buffer, '\0',buffer_size);
                         FD_CLR(client->socket,&reads);
                     }
+                    closesocket(client->socket);
                 }
                 client = client->next;
         }
@@ -119,17 +120,9 @@ int main() {
 
 void sendFile(struct clientList *client){
     char temp[25]={'\0'},c;
-    //long size =0;
-    //while((c=fgetc(fptr))) {
-        //if(c == EOF) break;
-        //size++;
-    //}
     fseek(fptr, 0L, SEEK_END);
     size_t size = ftell(fptr);
     rewind(fptr);
-    //fseek(fptr, 0, SEEK_END);
-    //size = ftell(fptr);
-    //fseek(fptr, 0, SEEK_SET);
     send(client->socket,"Connection: close\n",18,0);
     sprintf(temp,"Content-length: %d\n",size);
     send(client->socket,temp,strlen(temp),0);
@@ -145,6 +138,7 @@ void sendFile(struct clientList *client){
 
 void parse(char* line){
     path = strtok(line, "\n"); // get the first line of http request
+    printf("%s\n",path);
     path = strtok(path, " ");
     path = strtok(NULL, " ");
 }
@@ -176,6 +170,7 @@ void contentType(int clientPort){
 
 void validate(int clientPort){
     extension = strrchr(path,'.');
+
     if(extension == NULL){
             char temp[50] = {'\0'};
             strcpy(temp,root);
@@ -192,16 +187,20 @@ void validate(int clientPort){
                 }
                 if ((fptr = fopen(path,"rb")) == NULL){
                     send(clientPort, "HTTP/1.1 404 OK\n", 16,0);
+                    printf("Response code :404\n");
                     strcpy(path, "assets/404.html");
                 }else{
                     send(clientPort, "HTTP/1.1 200 OK\n", 16,0);
+                    printf("Response code :200\n");
                 }
             } else if (ENOENT == errno) {
                 send(clientPort, "HTTP/1.1 404 OK\n", 16,0);
+                printf("Response code :404\n");
                 strcpy(path, "assets/404.html");
                 fptr = fopen(path,"rb");
             } else {
                 send(clientPort, "HTTP/1.1 500 OK\n", 16,0);
+                printf("Response code :500\n");
                 strcpy(path, "assets/500.html");
                 fptr = fopen(path,"rb");
             }
@@ -213,9 +212,11 @@ void validate(int clientPort){
             if ((fptr = fopen(request,"rb")) == NULL){
                 send(clientPort, "HTTP/1.1 404 OK\n", 16,0);
                 strcpy(path, "assets/404.html");
+                printf("Response code :404\n");
                 fptr = fopen(path,"r");
             }else{
                 send(clientPort, "HTTP/1.1 200 OK\n", 16,0);
+                printf("Response code :200\n");
             }
     }
 }
@@ -234,14 +235,6 @@ struct clientList *addClient(){
     last->next = new_node;
     new_node->previous = last;
     return new_node;
-}
-
-struct clientList *lastClient(){
-    struct clientList *client = clients;
-    while(client->next != NULL) {
-        client = client->next;
-    }
-    return client;
 }
 
 void removeClient(struct clientList *del){
